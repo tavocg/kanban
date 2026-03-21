@@ -36,17 +36,20 @@ due: 2026-03-22T15:30
 Investigate token refresh behavior and update retry logic.
 ```
 
-Long content is trimmed using `--max-content`.
+Card content is trimmed to 180 characters.
 Cards with `done: true` show strikethrough.
 Cards with `archive: true` are hidden and counted in the tab title as `(<n>)`.
 When `due` is set, it is shown beside the title as `Title • Due in <n>d|<n>h|<n>m`.
 Past due dates are shown using the original frontmatter value as `Title • Due <due>`.
+Running `kanban` with no arguments shows two tabs, `Overdue` and `Next 7 days`, built from every board under `KANBAN_HOME`. In that agenda view, cards render as `board • title • due`.
 
 ## Usage
 
 Run directly:
 
 ```sh
+kanban
+kanban -l
 kanban -b my-board
 ```
 
@@ -60,6 +63,5 @@ Board home directory resolution order:
 Useful flags:
 
 - `-b/--board <name>`: board directory to render
-- `--list-boards`: list boards under home directory
-- `--max-content <n>`: max card body characters (default: `180`)
-- `--no-color`: disable ANSI styling
+- `-l`: list boards under home directory
+- `-n`: disable ANSI styling
