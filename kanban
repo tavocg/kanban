@@ -53,6 +53,7 @@ class Card:
     done: bool = False
     archive: bool = False
     due: datetime | None = None
+    due_text: str | None = None
 
 
 def default_kanban_home() -> Path:
@@ -198,6 +199,7 @@ def parse_card(path: Path) -> Card:
     done = False
     archive = False
     due: datetime | None = None
+    due_text: str | None = None
 
     if frontmatter:
         meta = parse_frontmatter(frontmatter)
@@ -207,7 +209,10 @@ def parse_card(path: Path) -> Card:
         tags = parse_tags(meta.get("tags"))
         done = parse_bool(meta.get("done"))
         archive = parse_bool(meta.get("archive"))
-        due = parse_due(meta.get("due"))
+        due_raw = meta.get("due")
+        if due_raw is not None:
+            due_text = strip_quotes(str(due_raw).strip()) or None
+        due = parse_due(due_raw)
 
     return Card(
         title=title,
@@ -217,6 +222,7 @@ def parse_card(path: Path) -> Card:
         done=done,
         archive=archive,
         due=due,
+        due_text=due_text,
     )
 
 
@@ -327,7 +333,7 @@ def chunked(items: list[str], size: int) -> Iterable[list[str]]:
         yield items[i : i + size]
 
 
-def format_due_line(due: datetime) -> str:
+def format_due_line(due: datetime, due_text: str | None = None) -> str:
     now = datetime.now().astimezone()
     target = due
 
@@ -336,14 +342,16 @@ def format_due_line(due: datetime) -> str:
     else:
         target = target.astimezone(now.tzinfo)
 
-    seconds = max(0.0, (target - now).total_seconds())
+    seconds = (target - now).total_seconds()
+    if seconds <= 0:
+        return f"Due {due_text}" if due_text else "Due now"
     if seconds >= 24 * 60 * 60:
         return f"Due in {math.ceil(seconds / (24 * 60 * 60))}d"
     if seconds >= 60 * 60:
         return f"Due in {math.ceil(seconds / (60 * 60))}h"
     if seconds > 0:
         return f"Due in {math.ceil(seconds / 60)}m"
-    return "Due in 0m"
+    return "Due now"
 
 
 def format_tags_line(tags: list[str], width: int, renderer: Renderer, colorize: bool = True) -> list[str]:
@@ -378,7 +386,7 @@ def build_card_lines(card: Card, width: int, max_content: int, renderer: Rendere
     lines: list[str] = []
 
     title = card.title.strip() or card.path.stem
-    due_label = format_due_line(card.due) if card.due is not None else None
+    due_label = format_due_line(card.due, card.due_text) if card.due is not None else None
     bullet = " • "
 
     if due_label is None:

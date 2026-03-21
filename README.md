@@ -40,6 +40,7 @@ Long content is trimmed using `--max-content`.
 Cards with `done: true` show strikethrough.
 Cards with `archive: true` are hidden and counted in the tab title as `(<n>)`.
 When `due` is set, it is shown beside the title as `Title • Due in <n>d|<n>h|<n>m`.
+Past due dates are shown using the original frontmatter value as `Title • Due <due>`.
 
 ## Usage
 
