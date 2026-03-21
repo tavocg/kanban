@@ -427,6 +427,8 @@ def build_due_agenda(home: Path) -> dict[str, list[Card]]:
                 )
 
                 if target <= now:
+                    if card.done:
+                        continue
                     agenda["Overdue"].append(agenda_card)
                 elif target <= cutoff:
                     agenda["Next 7 days"].append(agenda_card)
@@ -448,13 +450,24 @@ def render_board(board_name: str, tabs: dict[str, list[Card]], max_content: int,
         print(f"Board '{board_name}' has no tabs.")
         return
 
+    rendered_tabs: list[tuple[str, list[Card], int]] = []
+    for tab_name, tab_cards in tabs.items():
+        visible_cards = [card for card in tab_cards if not card.archive]
+        if not visible_cards:
+            continue
+        archived_count = len(tab_cards) - len(visible_cards)
+        rendered_tabs.append((tab_name, visible_cards, archived_count))
+
+    if not rendered_tabs:
+        print(f"Board '{board_name}' has no cards.")
+        return
+
     terminal_width = shutil.get_terminal_size(fallback=(120, 40)).columns
     gap = "   "
     min_col_width = 28
     max_columns = max(1, (terminal_width + len(gap)) // (min_col_width + len(gap)))
 
-    tab_names = list(tabs.keys())
-    for group in chunked(tab_names, max_columns):
+    for group in chunked(rendered_tabs, max_columns):
         columns = len(group)
         col_width = max(
             min_col_width,
@@ -462,10 +475,8 @@ def render_board(board_name: str, tabs: dict[str, list[Card]], max_content: int,
         )
 
         matrix: list[list[str]] = []
-        for tab in group:
-            visible_cards = [card for card in tabs[tab] if not card.archive]
-            archived_count = len(tabs[tab]) - len(visible_cards)
-            header = tab if archived_count == 0 else f"{tab} ({archived_count})"
+        for tab_name, visible_cards, archived_count in group:
+            header = tab_name if archived_count == 0 else f"{tab_name} ({archived_count})"
 
             lines = [renderer.muted(header), renderer.muted("-" * col_width)]
             for card in visible_cards:
