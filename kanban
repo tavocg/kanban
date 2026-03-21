@@ -390,18 +390,9 @@ def build_card_lines(card: Card, width: int, max_content: int, renderer: Rendere
     title = card.title.strip() or card.path.stem
     due_label = format_due_line(card.due, card.due_text) if card.due is not None else None
     bullet = " • "
-
-    if due_label is None:
-        title_lines = wrap_plain_text(title, width)
-        for line in title_lines:
-            lines.append(renderer.bold(line))
-    else:
-        title_width = max(1, width - len(bullet) - len(due_label))
-        title_lines = wrap_plain_text(title, title_width)
-        first_title = title_lines[0] if title_lines else title
-        lines.append(f"{renderer.bold(first_title)}{bullet}{due_label}")
-        for line in title_lines[1:]:
-            lines.append(renderer.bold(line))
+    header = title if due_label is None else f"{title}{bullet}{due_label}"
+    for line in wrap_plain_text(header, width):
+        lines.append(renderer.bold(line))
 
     lines.extend(format_tags_line(card.tags, width, renderer, colorize=True))
 
