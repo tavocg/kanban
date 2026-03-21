@@ -1,0 +1,415 @@
+#!/usr/bin/env python3
+"""Terminal Kanban board renderer.
+
+Directory layout:
+KANBAN_HOME/
+  <board>/
+    <tab>/
+      <card>.md
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import re
+import shutil
+import sys
+import textwrap
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+COLOR_CODES = [
+    33,
+    39,
+    45,
+    51,
+    69,
+    75,
+    81,
+    99,
+    117,
+    129,
+    141,
+    165,
+    178,
+    197,
+    203,
+    208,
+]
+
+
+@dataclass
+class Card:
+    title: str
+    tags: list[str]
+    content: str
+    path: Path
+
+
+def default_kanban_home() -> Path:
+    env = os.environ.get("KANBAN_HOME")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / "Documents" / "boards"
+
+
+def strip_quotes(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def split_frontmatter(raw: str) -> tuple[str, str]:
+    if not raw.startswith("---"):
+        return "", raw
+
+    lines = raw.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return "", raw
+
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            frontmatter = "".join(lines[1:i])
+            body = "".join(lines[i + 1 :])
+            return frontmatter, body
+
+    return "", raw
+
+
+def parse_frontmatter(block: str) -> dict[str, object]:
+    meta: dict[str, object] = {}
+    lines = block.splitlines()
+    i = 0
+
+    while i < len(lines):
+        line = lines[i].rstrip()
+        stripped = line.strip()
+
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+
+        if ":" not in line:
+            i += 1
+            continue
+
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+
+        if key == "tags" and not value:
+            tags: list[str] = []
+            i += 1
+            while i < len(lines):
+                candidate = lines[i].strip()
+                if candidate.startswith("- "):
+                    tag = strip_quotes(candidate[2:].strip())
+                    if tag:
+                        tags.append(tag)
+                    i += 1
+                else:
+                    break
+            meta[key] = tags
+            continue
+
+        meta[key] = strip_quotes(value)
+        i += 1
+
+    return meta
+
+
+def parse_tags(raw: object) -> list[str]:
+    if raw is None:
+        return []
+
+    parts: list[str]
+    if isinstance(raw, list):
+        parts = [str(item) for item in raw]
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if text.startswith("[") and text.endswith("]"):
+            inner = text[1:-1].strip()
+            parts = [] if not inner else [chunk.strip() for chunk in inner.split(",")]
+        elif "," in text:
+            parts = [chunk.strip() for chunk in text.split(",")]
+        elif text:
+            parts = [text]
+        else:
+            parts = []
+    else:
+        parts = [str(raw)]
+
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for part in parts:
+        tag = strip_quotes(part).strip()
+        if tag and tag not in seen:
+            seen.add(tag)
+            normalized.append(tag)
+
+    return normalized
+
+
+def parse_card(path: Path) -> Card:
+    raw = path.read_text(encoding="utf-8")
+    frontmatter, body = split_frontmatter(raw)
+
+    title = path.stem
+    tags: list[str] = []
+
+    if frontmatter:
+        meta = parse_frontmatter(frontmatter)
+        title_value = meta.get("title")
+        if isinstance(title_value, str) and title_value.strip():
+            title = title_value.strip()
+        tags = parse_tags(meta.get("tags"))
+
+    return Card(
+        title=title,
+        tags=tags,
+        content=body.strip(),
+        path=path,
+    )
+
+
+def truncate_content(text: str, max_length: int) -> str:
+    if max_length < 0 or len(text) <= max_length:
+        return text
+    if max_length <= 3:
+        return "." * max_length
+    return text[: max_length - 3].rstrip() + "..."
+
+
+def hash_color(tag: str) -> int:
+    digest = hashlib.sha256(tag.encode("utf-8")).digest()
+    return COLOR_CODES[digest[0] % len(COLOR_CODES)]
+
+
+def visible_len(text: str) -> int:
+    return len(ANSI_RE.sub("", text))
+
+
+def pad_visible(text: str, width: int) -> str:
+    current = visible_len(text)
+    if current >= width:
+        return text
+    return text + (" " * (width - current))
+
+
+def wrap_plain_text(text: str, width: int) -> list[str]:
+    if width <= 1:
+        return [text]
+
+    out: list[str] = []
+    paragraphs = text.splitlines() or [text]
+
+    for paragraph in paragraphs:
+        if not paragraph.strip():
+            out.append("")
+            continue
+        out.extend(
+            textwrap.wrap(
+                paragraph,
+                width=width,
+                break_long_words=True,
+                break_on_hyphens=False,
+            )
+        )
+
+    return out or [""]
+
+
+class Renderer:
+    def __init__(self, enable_color: bool) -> None:
+        self.enable_color = enable_color
+
+    def bold(self, text: str) -> str:
+        if not self.enable_color:
+            return text
+        return f"\033[1m{text}\033[0m"
+
+    def color_tag(self, tag: str) -> str:
+        label = f"[{tag}]"
+        if not self.enable_color:
+            return label
+        code = hash_color(tag)
+        return f"\033[38;5;{code}m{label}\033[0m"
+
+
+def list_boards(home: Path) -> list[str]:
+    if not home.exists() or not home.is_dir():
+        return []
+    return sorted([item.name for item in home.iterdir() if item.is_dir()], key=str.lower)
+
+
+def load_board(home: Path, board_name: str) -> tuple[Path, dict[str, list[Card]]]:
+    board_dir = home / board_name
+    if not board_dir.exists() or not board_dir.is_dir():
+        raise FileNotFoundError(f"Board '{board_name}' not found in {home}")
+
+    tabs = sorted([item for item in board_dir.iterdir() if item.is_dir()], key=lambda p: p.name.lower())
+    board_data: dict[str, list[Card]] = {}
+
+    for tab_dir in tabs:
+        cards = [parse_card(path) for path in sorted(tab_dir.glob("*.md"), key=lambda p: p.name.lower())]
+        board_data[tab_dir.name] = cards
+
+    return board_dir, board_data
+
+
+def chunked(items: list[str], size: int) -> Iterable[list[str]]:
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
+
+
+def format_tags_line(tags: list[str], width: int, renderer: Renderer) -> list[str]:
+    if not tags:
+        return []
+
+    lines: list[list[str]] = []
+    current: list[str] = []
+    current_len = 0
+
+    for tag in tags:
+        plain = f"[{tag}]"
+        add_len = len(plain) if current_len == 0 else len(plain) + 1
+
+        if current and current_len + add_len > width:
+            lines.append(current)
+            current = [tag]
+            current_len = len(plain)
+        else:
+            current.append(tag)
+            current_len += add_len
+
+    if current:
+        lines.append(current)
+
+    return [" ".join(renderer.color_tag(tag) for tag in line) for line in lines]
+
+
+def build_card_lines(card: Card, width: int, max_content: int, renderer: Renderer) -> list[str]:
+    lines: list[str] = []
+
+    title = card.title.strip() or card.path.stem
+    title_lines = wrap_plain_text(title, width)
+    for line in title_lines:
+        lines.append(renderer.bold(line))
+
+    lines.extend(format_tags_line(card.tags, width, renderer))
+
+    content = truncate_content(card.content, max_content)
+    if content:
+        lines.extend(wrap_plain_text(content, width))
+
+    lines.append("")
+    return lines
+
+
+def render_board(board_name: str, tabs: dict[str, list[Card]], max_content: int, renderer: Renderer) -> None:
+    if not tabs:
+        print(f"Board '{board_name}' has no tabs.")
+        return
+
+    terminal_width = shutil.get_terminal_size(fallback=(120, 40)).columns
+    gap = "   "
+    min_col_width = 28
+    max_columns = max(1, (terminal_width + len(gap)) // (min_col_width + len(gap)))
+
+    print(f"{renderer.bold('Board:')} {board_name}")
+
+    tab_names = list(tabs.keys())
+    for group in chunked(tab_names, max_columns):
+        columns = len(group)
+        col_width = max(
+            min_col_width,
+            (terminal_width - (len(gap) * (columns - 1))) // max(columns, 1),
+        )
+
+        matrix: list[list[str]] = []
+        for tab in group:
+            lines = [renderer.bold(tab), "-" * col_width]
+            for card in tabs[tab]:
+                lines.extend(build_card_lines(card, col_width, max_content, renderer))
+            matrix.append(lines)
+
+        max_rows = max(len(col) for col in matrix)
+        for col in matrix:
+            col.extend([""] * (max_rows - len(col)))
+
+        for row in range(max_rows):
+            row_text = gap.join(pad_visible(col[row], col_width) for col in matrix)
+            print(row_text.rstrip())
+
+        print()
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Render a filesystem-backed kanban board in the terminal.")
+    parser.add_argument("-b", "--board", help="Board name (directory under KANBAN_HOME)")
+    parser.add_argument(
+        "--home",
+        help="Override board home directory (default: $KANBAN_HOME or $HOME/Documents/boards)",
+    )
+    parser.add_argument(
+        "--max-content",
+        type=int,
+        default=180,
+        help="Maximum number of characters from card content to display (default: 180)",
+    )
+    parser.add_argument("--list-boards", action="store_true", help="List available boards and exit")
+    parser.add_argument("--no-color", action="store_true", help="Disable ANSI styling")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+
+    home = Path(args.home).expanduser() if args.home else default_kanban_home()
+    color_enabled = bool(sys.stdout.isatty()) and not args.no_color and os.environ.get("NO_COLOR") is None
+    renderer = Renderer(enable_color=color_enabled)
+
+    if args.list_boards:
+        boards = list_boards(home)
+        if not boards:
+            print(f"No boards found in {home}")
+            return 0
+        for board in boards:
+            print(board)
+        return 0
+
+    if not args.board:
+        boards = list_boards(home)
+        if boards:
+            print("Please provide a board with -b/--board. Available boards:")
+            for board in boards:
+                print(f"- {board}")
+        else:
+            print(f"Please provide a board with -b/--board. No boards found in {home}")
+        return 2
+
+    try:
+        _, board_data = load_board(home, args.board)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        boards = list_boards(home)
+        if boards:
+            print("Available boards:", file=sys.stderr)
+            for board in boards:
+                print(f"- {board}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"Failed to read board data: {exc}", file=sys.stderr)
+        return 1
+
+    render_board(args.board, board_data, max_content=max(args.max_content, 0), renderer=renderer)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
