@@ -19,6 +19,9 @@ Card frontmatter supports:
 
 - `title`
 - `tags`
+- `done` (`true`/`false`)
+- `archive` (`true`/`false`)
+- `due` (ISO datetime or date, for example `2026-03-22T15:30` or `2026-03-22`)
 
 Example card:
 
@@ -26,12 +29,17 @@ Example card:
 ---
 title: Fix login flow
 tags: [backend, urgent]
+done: false
+archive: false
+due: 2026-03-22T15:30
 ---
 Investigate token refresh behavior and update retry logic.
 ```
 
-The card body is printed as-is (plain text wrapping only).
 Long content is trimmed using `--max-content`.
+Cards with `done: true` show strikethrough.
+Cards with `archive: true` are hidden and counted in the tab title as `(<n>)`.
+When `due` is set, it is shown beside the title as `Title • Due in <n>d|<n>h|<n>m`.
 
 ## Usage
 
