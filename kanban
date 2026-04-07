@@ -25,7 +25,7 @@ from typing import Iterable
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 DEFAULT_MAX_CONTENT = 180
-AGENDA_WINDOW_DAYS = 7
+AGENDA_WINDOW_DAYS = 15
 COLOR_CODES = [
     33,
     39,
@@ -312,7 +312,9 @@ class Renderer:
 def list_boards(home: Path) -> list[str]:
     if not home.exists() or not home.is_dir():
         return []
-    return sorted([item.name for item in home.iterdir() if item.is_dir()], key=str.lower)
+    return sorted(
+        [item.name for item in home.iterdir() if item.is_dir()], key=str.lower
+    )
 
 
 def load_board(home: Path, board_name: str) -> tuple[Path, dict[str, list[Card]]]:
@@ -320,11 +322,17 @@ def load_board(home: Path, board_name: str) -> tuple[Path, dict[str, list[Card]]
     if not board_dir.exists() or not board_dir.is_dir():
         raise FileNotFoundError(f"Board '{board_name}' not found in {home}")
 
-    tabs = sorted([item for item in board_dir.iterdir() if item.is_dir()], key=lambda p: p.name.lower())
+    tabs = sorted(
+        [item for item in board_dir.iterdir() if item.is_dir()],
+        key=lambda p: p.name.lower(),
+    )
     board_data: dict[str, list[Card]] = {}
 
     for tab_dir in tabs:
-        cards = [parse_card(path) for path in sorted(tab_dir.glob("*.md"), key=lambda p: p.name.lower())]
+        cards = [
+            parse_card(path)
+            for path in sorted(tab_dir.glob("*.md"), key=lambda p: p.name.lower())
+        ]
         board_data[tab_dir.name] = cards
 
     return board_dir, board_data
@@ -335,7 +343,9 @@ def chunked(items: list[str], size: int) -> Iterable[list[str]]:
         yield items[i : i + size]
 
 
-def localize_due(due: datetime, now: datetime | None = None) -> tuple[datetime, datetime]:
+def localize_due(
+    due: datetime, now: datetime | None = None
+) -> tuple[datetime, datetime]:
     current = now or datetime.now().astimezone()
     if due.tzinfo is None:
         return current, due.replace(tzinfo=current.tzinfo)
@@ -356,7 +366,9 @@ def format_due_line(due: datetime, due_text: str | None = None) -> str:
     return "Due now"
 
 
-def format_tags_line(tags: list[str], width: int, renderer: Renderer, colorize: bool = True) -> list[str]:
+def format_tags_line(
+    tags: list[str], width: int, renderer: Renderer, colorize: bool = True
+) -> list[str]:
     if not tags:
         return []
 
@@ -384,11 +396,15 @@ def format_tags_line(tags: list[str], width: int, renderer: Renderer, colorize: 
     return [" ".join(f"[{tag}]" for tag in line) for line in lines]
 
 
-def build_card_lines(card: Card, width: int, max_content: int, renderer: Renderer) -> list[str]:
+def build_card_lines(
+    card: Card, width: int, max_content: int, renderer: Renderer
+) -> list[str]:
     lines: list[str] = []
 
     title = card.title.strip() or card.path.stem
-    due_label = format_due_line(card.due, card.due_text) if card.due is not None else None
+    due_label = (
+        format_due_line(card.due, card.due_text) if card.due is not None else None
+    )
     bullet = " • "
     header = title if due_label is None else f"{title}{bullet}{due_label}"
     for line in wrap_plain_text(header, width):
@@ -404,7 +420,10 @@ def build_card_lines(card: Card, width: int, max_content: int, renderer: Rendere
 
     lines.append("")
     if card.done:
-        return [renderer.strikethrough_preserving_styles(line) if line else line for line in lines]
+        return [
+            renderer.strikethrough_preserving_styles(line) if line else line
+            for line in lines
+        ]
     return lines
 
 
@@ -445,7 +464,9 @@ def build_due_agenda(home: Path) -> dict[str, list[Card]]:
     return agenda
 
 
-def render_board(board_name: str, tabs: dict[str, list[Card]], max_content: int, renderer: Renderer) -> None:
+def render_board(
+    board_name: str, tabs: dict[str, list[Card]], max_content: int, renderer: Renderer
+) -> None:
     if not tabs:
         print(f"Board '{board_name}' has no tabs.")
         return
@@ -476,7 +497,9 @@ def render_board(board_name: str, tabs: dict[str, list[Card]], max_content: int,
 
         matrix: list[list[str]] = []
         for tab_name, visible_cards, archived_count in group:
-            header = tab_name if archived_count == 0 else f"{tab_name} ({archived_count})"
+            header = (
+                tab_name if archived_count == 0 else f"{tab_name} ({archived_count})"
+            )
 
             lines = [renderer.muted(header), renderer.muted("-" * col_width)]
             for card in visible_cards:
@@ -495,10 +518,21 @@ def render_board(board_name: str, tabs: dict[str, list[Card]], max_content: int,
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Render a filesystem-backed kanban board in the terminal.")
-    parser.add_argument("-b", "--board", help="Board name (directory under KANBAN_HOME)")
-    parser.add_argument("-l", dest="list_boards", action="store_true", help="List available boards and exit")
-    parser.add_argument("-n", dest="no_color", action="store_true", help="Disable ANSI styling")
+    parser = argparse.ArgumentParser(
+        description="Render a filesystem-backed kanban board in the terminal."
+    )
+    parser.add_argument(
+        "-b", "--board", help="Board name (directory under KANBAN_HOME)"
+    )
+    parser.add_argument(
+        "-l",
+        dest="list_boards",
+        action="store_true",
+        help="List available boards and exit",
+    )
+    parser.add_argument(
+        "-n", dest="no_color", action="store_true", help="Disable ANSI styling"
+    )
     return parser.parse_args(argv)
 
 
@@ -506,7 +540,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     home = default_kanban_home()
-    color_enabled = bool(sys.stdout.isatty()) and not args.no_color and os.environ.get("NO_COLOR") is None
+    color_enabled = (
+        bool(sys.stdout.isatty())
+        and not args.no_color
+        and os.environ.get("NO_COLOR") is None
+    )
     renderer = Renderer(enable_color=color_enabled)
 
     if args.list_boards:
@@ -523,7 +561,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"No boards found in {home}")
             return 2
         try:
-            render_board("Agenda", build_due_agenda(home), max_content=DEFAULT_MAX_CONTENT, renderer=renderer)
+            render_board(
+                "Agenda",
+                build_due_agenda(home),
+                max_content=DEFAULT_MAX_CONTENT,
+                renderer=renderer,
+            )
         except OSError as exc:
             print(f"Failed to read board data: {exc}", file=sys.stderr)
             return 1
@@ -543,7 +586,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Failed to read board data: {exc}", file=sys.stderr)
         return 1
 
-    render_board(args.board, board_data, max_content=DEFAULT_MAX_CONTENT, renderer=renderer)
+    render_board(
+        args.board, board_data, max_content=DEFAULT_MAX_CONTENT, renderer=renderer
+    )
     return 0
 
 
