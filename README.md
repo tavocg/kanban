@@ -51,6 +51,7 @@ Run directly:
 kanban
 kanban -l
 kanban -b my-board
+kanban -b meca
 ```
 
 ## Configuration
@@ -62,6 +63,6 @@ Board home directory resolution order:
 
 Useful flags:
 
-- `-b/--board <name>`: board directory to render
+- `-b/--board <name>`: board directory to render; accepts partial, case-insensitive, accent-insensitive matches and prefers the closest match
 - `-l`: list boards under home directory
 - `-n`: disable ANSI styling
