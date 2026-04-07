@@ -392,6 +392,15 @@ def load_board(home: Path, board_name: str) -> tuple[Path, dict[str, list[Card]]
             parse_card(path)
             for path in sorted(tab_dir.glob("*.md"), key=lambda p: p.name.lower())
         ]
+        now = datetime.now().astimezone()
+
+        def card_sort_key(card: Card) -> tuple[float, str]:
+            if card.due is None:
+                return (float("inf"), card.path.name.lower())
+            _, target = localize_due(card.due, now)
+            return (target.timestamp(), card.path.name.lower())
+
+        cards.sort(key=card_sort_key)
         board_data[tab_dir.name] = cards
 
     return board_dir, board_data
